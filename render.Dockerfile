@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN pip install --no-cache-dir numpy pillow requests
 
 COPY render_reel.sh /app/render_reel.sh
+COPY reels.txt /app/reels.txt
 RUN chmod +x /app/render_reel.sh
 
 WORKDIR /app

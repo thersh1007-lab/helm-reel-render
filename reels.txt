@@ -1,0 +1,4 @@
+# Reels to render (one key per line, # comments ok). Baked into the image.
+# 2-reel pipeline proof:
+c2_fastisnt_v3
+c5_experienced_v3

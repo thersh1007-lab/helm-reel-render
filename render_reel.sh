@@ -8,8 +8,15 @@
 #      GITHUB_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET.
 set -uo pipefail   # deliberately NOT -e: one bad reel must not abort the whole batch
 
-REELS="${REELS:-${REEL:-}}"
-[ -z "$REELS" ] && { echo "ERROR: set REELS (space-separated) or REEL"; exit 1; }
+# Reel list resolution (most deterministic first): env REELS -> committed reels.txt -> env REEL.
+# reels.txt is baked into the image (version-controlled), which avoids Render's per-job env
+# snapshotting that silently dropped a service-level REELS var.
+REELS="${REELS:-}"
+if [ -z "$REELS" ] && [ -f /app/reels.txt ]; then
+  REELS="$(grep -vE '^\s*(#|$)' /app/reels.txt | tr '\n' ' ')"
+fi
+[ -z "$REELS" ] && REELS="${REEL:-}"
+[ -z "$REELS" ] && { echo "ERROR: no reels (set REELS env, /app/reels.txt, or REEL)"; exit 1; }
 WORK="${RENDER_WORK:-/app/render}"
 MCC="$WORK/mcc"
 mkdir -p "$WORK"
