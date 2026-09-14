@@ -1,30 +1,27 @@
 #!/usr/bin/env bash
-# Dedicated MCC reel render worker (runs as a Render cron, triggered per reel or per batch).
-# Runs the ffmpeg render pipeline DIRECTLY (no LLM, no Bash-tool timeout, no autodeploy
-# collision) so long renders finish reliably. Pulls footage from R2 once, then renders each
-# reel in REELS and uploads every finished mp4.
+# Dedicated MCC reel render worker (Render cron, manual trigger). Renders the ffmpeg pipeline
+# DIRECTLY (no LLM, no Bash-tool timeout, no autodeploy collision), then self-delivers:
+# posts each finished reel to the Helm Ops "Proof ready" list + emails Tim (deliver.py).
 #
-# Env: REELS (space-separated list, e.g. "c2_fastisnt_v3 c3_drive_v3") OR REEL (single).
-#      GITHUB_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET.
-set -uo pipefail   # deliberately NOT -e: one bad reel must not abort the whole batch
+# Reel list: env REELS (space-separated) -> committed /app/reels.txt -> env REEL.
+# Env: GITHUB_TOKEN, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, R2_ENDPOINT, R2_BUCKET.
+# Delivery (optional): TRELLO_KEY, TRELLO_TOKEN, HELM_PROOF_LIST, GMAIL_CLIENT_ID,
+#   GMAIL_CLIENT_SECRET, GMAIL_REFRESH_TOKEN, EMAIL_TO. Set DELIVER=0 to skip delivery.
+set -uo pipefail   # deliberately NOT -e: one bad reel must not abort the batch
 
-# Reel list resolution (most deterministic first): env REELS -> committed reels.txt -> env REEL.
-# reels.txt is baked into the image (version-controlled), which avoids Render's per-job env
-# snapshotting that silently dropped a service-level REELS var.
 REELS="${REELS:-}"
 if [ -z "$REELS" ] && [ -f /app/reels.txt ]; then
   REELS="$(grep -vE '^\s*(#|$)' /app/reels.txt | tr '\n' ' ')"
 fi
 [ -z "$REELS" ] && REELS="${REEL:-}"
 [ -z "$REELS" ] && { echo "ERROR: no reels (set REELS env, /app/reels.txt, or REEL)"; exit 1; }
-WORK="${RENDER_WORK:-/app/render}"
-MCC="$WORK/mcc"
-mkdir -p "$WORK"
+
+WORK="${RENDER_WORK:-/app/render}"; MCC="$WORK/mcc"; mkdir -p "$WORK"
+MANIFEST=/tmp/manifest.txt; : > "$MANIFEST"
 
 echo "== render worker: REELS=[$REELS] =="
 df -h "$WORK" | tail -1
 
-# Sparse clone: only social/ (proof_prospect + logos + fonts + _tx_cache).
 if [ ! -d "$MCC/.git" ]; then
   git clone --depth 1 --filter=blob:none --sparse \
     "https://x-access-token:${GITHUB_TOKEN}@github.com/thersh1007-lab/Monument-City-Capital.git" "$MCC"
@@ -34,7 +31,6 @@ else
 fi
 cd "$MCC"
 
-# Footage from R2 once (the lean set covers every reel)
 python3 social/r2_footage.py download-lean
 
 export RCLONE_CONFIG_MCCR2_TYPE=s3 RCLONE_CONFIG_MCCR2_PROVIDER=Cloudflare \
@@ -51,8 +47,10 @@ for R in $REELS; do
       echo "RENDERED $R: $OUT"
       ffprobe -v error -select_streams v:0 -show_entries stream=width,height \
         -show_entries format=duration,size -of default=noprint_wrappers=1 "$OUT"
+      BN="$(basename "$OUT")"
       if rclone copy "$OUT" "mccr2:${R2_BUCKET}/_cloud_renders/" --s3-no-check-bucket; then
-        echo "UPLOADED $R -> $(basename "$OUT")"; ok=$((ok+1))
+        echo "UPLOADED $R -> $BN"; ok=$((ok+1))
+        echo "${R}|${OUT}|_cloud_renders/${BN}" >> "$MANIFEST"
       else
         echo "UPLOAD FAILED for $R"; fail=$((fail+1)); failed_list="$failed_list $R(upload)"
       fi
@@ -64,5 +62,14 @@ for R in $REELS; do
   fi
 done
 
-echo "== batch done: $ok ok, $fail failed ==${failed_list:+  FAILED:$failed_list}"
+echo "== render done: $ok ok, $fail failed ==${failed_list:+  FAILED:$failed_list}"
+
+# Self-deliver: Proof-ready Trello cards + summary email
+if [ "${DELIVER:-1}" = "1" ] && [ "$ok" -gt 0 ] && [ -s "$MANIFEST" ]; then
+  echo "== delivering $ok reel(s) to Helm Proof ready + email =="
+  python3 /app/deliver.py "$MANIFEST" || echo "deliver.py returned nonzero"
+else
+  echo "== delivery skipped (DELIVER=${DELIVER:-1}, ok=$ok) =="
+fi
+
 [ "$fail" -gt 0 ] && exit 1 || exit 0

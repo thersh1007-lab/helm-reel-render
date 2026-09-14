@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir numpy pillow requests
 
 COPY render_reel.sh /app/render_reel.sh
 COPY reels.txt /app/reels.txt
+COPY deliver.py /app/deliver.py
+COPY reels_meta.json /app/reels_meta.json
 RUN chmod +x /app/render_reel.sh
 
 WORKDIR /app

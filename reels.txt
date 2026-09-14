@@ -1,4 +1,12 @@
 # Reels to render (one key per line, # comments ok). Baked into the image.
-# 2-reel pipeline proof:
-c2_fastisnt_v3
-c5_experienced_v3
+# 10 short-form viral social reels (Dr. Slate concepts, 15-30s), cloud batch + auto-deliver.
+s01_passedon
+s02_fastisnt
+s03_100k1or3
+s04_scalenotharder
+s05_prosuseit
+s06_threereasons
+s07_titlewhy
+s08_fund100pct
+s09_norehabcash
+s10_ownvslend
